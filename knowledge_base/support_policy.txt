@@ -1,0 +1,16 @@
+Support policy for the sample chatbot:
+
+Severity levels:
+- Sev 1: Production outage or complete service unavailability.
+- Sev 2: Major feature degradation with business impact.
+- Sev 3: Minor bug or workaround available.
+
+Escalation guidance:
+- Sev 1 issues should be escalated immediately to the on-call team.
+- Billing-only questions should be routed to the billing queue.
+- Feature requests should be recorded as product feedback, not incident tickets.
+
+Response style:
+- Confirm what evidence is in the knowledge base.
+- Do not claim ticket status unless it appears in the retrieved documents.
+

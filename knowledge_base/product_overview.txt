@@ -1,0 +1,12 @@
+The Gemini Streamlit support assistant is designed for internal product help.
+
+Supported capabilities:
+- Answer questions about product setup, account onboarding, and deployment basics.
+- Summarize known limitations and escalation paths.
+- Reference internal runbooks when they are loaded into the knowledge base.
+
+Known limitations:
+- The sample app does not execute external tools.
+- It should not invent account-specific production facts.
+- If the answer is missing from retrieved context, it should say so explicitly.
+

@@ -8,8 +8,6 @@ import streamlit as st
 from dotenv import dotenv_values, load_dotenv
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
-
 from rag_utils import (
     LoadedSource,
     build_documents,
@@ -26,7 +24,12 @@ KNOWLEDGE_DIR = APP_DIR / "knowledge_base"
 
 load_dotenv(dotenv_path=ENV_PATH)
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL_OPTIONS = [
+    "Gemini 2.5 Flash",
+    "Gemini 3 Flash",
+    "Gemini 2.5 Flash Lite",
+    "Gemini 3.1 Flash Lite",
+]
 DEFAULT_SYSTEM_PROMPT = (
     "You are a RAG-enabled assistant. Use retrieved context when relevant, cite source file names, "
     "and say clearly when the available documents do not support a confident answer."
@@ -58,12 +61,71 @@ def get_api_key() -> str:
     return api_key
 
 
-def build_llm(model_name: str, temperature: float) -> ChatGoogleGenerativeAI:
+def build_llm(model_name: str, temperature: float):
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
     return ChatGoogleGenerativeAI(
         model=model_name,
         google_api_key=get_api_key(),
         temperature=temperature,
     )
+
+
+def get_available_models() -> list[str]:
+    env_value = os.getenv("GEMINI_AVAILABLE_MODELS", "")
+    configured = [item.strip() for item in env_value.split(",") if item.strip()]
+    models = configured or DEFAULT_MODEL_OPTIONS
+    return list(dict.fromkeys(models))
+
+
+def parse_model_chain(primary_model: str, fallback_models: list[str] | None = None) -> list[str]:
+    configured = fallback_models or []
+    if not configured:
+        env_value = os.getenv("GEMINI_FALLBACK_MODELS", "")
+        configured = [item.strip() for item in env_value.split(",") if item.strip()]
+
+    chain: list[str] = []
+    for candidate in [primary_model, *configured, *get_available_models()]:
+        if candidate and candidate not in chain:
+            chain.append(candidate)
+    return chain
+
+
+def is_model_limit_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    signals = [
+        "429",
+        "quota",
+        "rate limit",
+        "resource exhausted",
+        "resource_exhausted",
+        "too many requests",
+        "exceeded",
+        "limit reached",
+    ]
+    return any(signal in message for signal in signals)
+
+
+def invoke_with_model_fallback(messages, model_chain: list[str], temperature: float):
+    if not model_chain:
+        raise ValueError("Model chain is empty.")
+
+    errors: list[str] = []
+    last_exc: Exception | None = None
+    for index, model_name in enumerate(model_chain):
+        try:
+            llm = build_llm(model_name=model_name, temperature=temperature)
+            response = llm.invoke(messages)
+            return response, model_name, errors
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if index == len(model_chain) - 1 or not is_model_limit_error(exc):
+                raise
+            errors.append(f"{model_name}: {exc}")
+
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError("Model invocation failed without an exception.")
 
 
 def init_state() -> None:
@@ -79,6 +141,10 @@ def init_state() -> None:
         st.session_state.rag_vector_store = None
     if "rag_index_signature" not in st.session_state:
         st.session_state.rag_index_signature = ""
+    if "rag_last_model" not in st.session_state:
+        st.session_state.rag_last_model = ""
+    if "rag_model_failovers" not in st.session_state:
+        st.session_state.rag_model_failovers = []
 
 
 def build_messages(
@@ -143,14 +209,23 @@ def build_index_if_needed(uploaded_files, force_rebuild: bool = False) -> None:
 
 def sidebar():
     st.sidebar.title("RAG Settings")
+    available_models = get_available_models()
+    configured_primary = os.getenv("GEMINI_MODEL", available_models[0])
+    if configured_primary not in available_models:
+        available_models = [configured_primary, *available_models]
     model_name = st.sidebar.selectbox(
         "Gemini model",
-        options=[
-            DEFAULT_MODEL,
-            "gemini-2.0-flash-lite",
-            "gemini-2.0-flash",
-        ],
-        index=0,
+        options=available_models,
+        index=available_models.index(configured_primary),
+    )
+    default_fallbacks = [
+        model for model in parse_model_chain(model_name)[1:] if model in available_models
+    ]
+    fallback_models = st.sidebar.multiselect(
+        "Fallback models",
+        options=[model for model in available_models if model != model_name],
+        default=default_fallbacks,
+        help="These models are tried automatically if the primary model hits a quota or rate limit.",
     )
     temperature = st.sidebar.slider("Temperature", min_value=0.0, max_value=1.0, value=0.2, step=0.1)
     top_k = st.sidebar.slider("Retrieved chunks", min_value=1, max_value=6, value=4, step=1)
@@ -176,9 +251,10 @@ def sidebar():
     st.sidebar.subheader("Diagnostics")
     st.sidebar.write(f"Key source: `{source}`")
     st.sidebar.write(f"Key detected: `{mask_secret(key)}`")
+    st.sidebar.write(f"Model chain: `{', '.join(parse_model_chain(model_name, fallback_models))}`")
     st.sidebar.write(f"Local knowledge files: `{len(load_local_sources(KNOWLEDGE_DIR))}`")
     st.sidebar.write(f"Uploaded documents: `{len(uploaded_files) if uploaded_files else 0}`")
-    return model_name, temperature, top_k, uploaded_files or [], rebuild
+    return model_name, fallback_models, temperature, top_k, uploaded_files or [], rebuild
 
 
 def render_history() -> None:
@@ -191,11 +267,21 @@ def render_context_panel() -> None:
     with st.expander("Last retrieved context", expanded=False):
         if not st.session_state.rag_last_context:
             st.caption("No context retrieved yet.")
+        else:
+            for doc in st.session_state.rag_last_context:
+                st.markdown(f"**{doc.metadata.get('source', 'unknown')}**")
+                st.caption(f"Chunk {doc.metadata.get('chunk', '?')}")
+                st.write(doc.page_content)
+
+    with st.expander("Last model run", expanded=False):
+        if not st.session_state.rag_last_model:
+            st.caption("No model invocation yet.")
             return
-        for doc in st.session_state.rag_last_context:
-            st.markdown(f"**{doc.metadata.get('source', 'unknown')}**")
-            st.caption(f"Chunk {doc.metadata.get('chunk', '?')}")
-            st.write(doc.page_content)
+        st.write(f"Model used: `{st.session_state.rag_last_model}`")
+        if st.session_state.rag_model_failovers:
+            st.write("Automatic fallback attempts:")
+            for item in st.session_state.rag_model_failovers:
+                st.code(item)
 
 
 def main() -> None:
@@ -209,7 +295,7 @@ def main() -> None:
         "and any uploaded `.txt`, `.pdf`, or `.docx` documents."
     )
 
-    model_name, temperature, top_k, uploaded_files, rebuild = sidebar()
+    model_name, fallback_models, temperature, top_k, uploaded_files, rebuild = sidebar()
     try:
         build_index_if_needed(uploaded_files, force_rebuild=rebuild)
     except Exception as exc:
@@ -232,16 +318,23 @@ def main() -> None:
 
         retrieved = retrieve_context(st.session_state.rag_vector_store, prompt, top_k=top_k)
         st.session_state.rag_last_context = retrieved
-        llm = build_llm(model_name=model_name, temperature=temperature)
         messages = build_messages(
             history=st.session_state.rag_chat_history[:-1],
             system_prompt=st.session_state.rag_system_prompt,
             question=prompt,
             context_docs=retrieved,
         )
-        response = llm.invoke(messages)
+        response, used_model, failovers = invoke_with_model_fallback(
+            messages=messages,
+            model_chain=parse_model_chain(model_name, fallback_models),
+            temperature=temperature,
+        )
+        st.session_state.rag_last_model = used_model
+        st.session_state.rag_model_failovers = failovers
         answer = response.content if isinstance(response.content, str) else str(response.content)
     except Exception as exc:
+        st.session_state.rag_last_model = ""
+        st.session_state.rag_model_failovers = []
         answer = f"Request failed: {exc}"
 
     st.session_state.rag_chat_history.append(("assistant", answer))
@@ -251,4 +344,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

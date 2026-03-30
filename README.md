@@ -8,6 +8,7 @@ Simple chatbot app built with `Streamlit`, `LangChain`, and the Gemini Developer
 - `LangChain` for chat message handling
 - `langchain-google-genai` for Gemini integration
 - Embedding-based RAG flow with Gemini embeddings and FAISS
+- Automatic Gemini model fallback on quota and rate-limit failures
 
 ## Project Files
 
@@ -31,6 +32,14 @@ pip install -r requirements.txt
 
 ```powershell
 Copy-Item .env.example .env
+```
+
+Optional model fallback chain:
+
+```text
+GEMINI_MODEL=Gemini 2.5 Flash
+GEMINI_FALLBACK_MODELS=Gemini 3 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
+GEMINI_AVAILABLE_MODELS=Gemini 2.5 Flash,Gemini 3 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
 ```
 
 ## Run
@@ -58,6 +67,7 @@ The sample RAG app:
 - builds an in-memory `FAISS` vector store
 - retrieves the most similar chunks for a question
 - passes those chunks to Gemini as grounded context
+- automatically switches to the next configured Gemini model when the current one hits quota or rate-limit errors
 - shows the last retrieved context in the UI
 
 To expand the knowledge base, add more files to `knowledge_base/` or upload them in the sidebar.
@@ -66,7 +76,7 @@ To expand the knowledge base, add more files to `knowledge_base/` or upload them
 
 - Do not commit `.env` files or reuse any Gemini API key that was pasted into chat or source control.
 - Gemini free-tier rate limits and available models can change by project and region.
-- If `gemini-2.5-flash` is unavailable for your project, switch to `gemini-2.0-flash-lite` or `gemini-2.0-flash`.
+- The app only switches models automatically for quota and rate-limit style failures, not for invalid prompts, auth failures, or unsupported model names.
 - The vector index is in-memory for the current app session and is rebuilt when local or uploaded documents change.
 
 ## Free-tier Reference

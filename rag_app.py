@@ -12,7 +12,9 @@ from rag_utils import (
     LoadedSource,
     build_documents,
     build_vector_store,
+    get_available_embedding_models,
     load_local_sources,
+    parse_embedding_chain,
     read_source_bytes,
     retrieve_context,
 )
@@ -25,15 +27,21 @@ KNOWLEDGE_DIR = APP_DIR / "knowledge_base"
 load_dotenv(dotenv_path=ENV_PATH)
 
 DEFAULT_MODEL_OPTIONS = [
-    "Gemini 2.5 Flash",
-    "Gemini 3 Flash",
-    "Gemini 2.5 Flash Lite",
     "Gemini 3.1 Flash Lite",
+    "Gemini 3 Flash",
+    "Gemini 2.5 Flash",
+    "Gemini 2.5 Flash Lite",
 ]
 DEFAULT_SYSTEM_PROMPT = (
     "You are a RAG-enabled assistant. Use retrieved context when relevant, cite source file names, "
     "and say clearly when the available documents do not support a confident answer."
 )
+MODEL_NAME_ALIASES = {
+    "Gemini 3.1 Flash Lite": "gemini-3.1-flash-lite-preview",
+    "Gemini 3 Flash": "gemini-3-flash-preview",
+    "Gemini 2.5 Flash": "gemini-2.5-flash",
+    "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite",
+}
 
 
 def mask_secret(value: str | None) -> str:
@@ -61,11 +69,15 @@ def get_api_key() -> str:
     return api_key
 
 
+def normalize_model_name(model_name: str) -> str:
+    return MODEL_NAME_ALIASES.get(model_name, model_name)
+
+
 def build_llm(model_name: str, temperature: float):
     from langchain_google_genai import ChatGoogleGenerativeAI
 
     return ChatGoogleGenerativeAI(
-        model=model_name,
+        model=normalize_model_name(model_name),
         google_api_key=get_api_key(),
         temperature=temperature,
     )
@@ -102,6 +114,10 @@ def is_model_limit_error(exc: Exception) -> bool:
         "too many requests",
         "exceeded",
         "limit reached",
+        "invalid_argument",
+        "unexpected model name format",
+        "model not found",
+        "unsupported model",
     ]
     return any(signal in message for signal in signals)
 
@@ -145,6 +161,10 @@ def init_state() -> None:
         st.session_state.rag_last_model = ""
     if "rag_model_failovers" not in st.session_state:
         st.session_state.rag_model_failovers = []
+    if "rag_last_embedding_model" not in st.session_state:
+        st.session_state.rag_last_embedding_model = ""
+    if "rag_embedding_failovers" not in st.session_state:
+        st.session_state.rag_embedding_failovers = []
 
 
 def build_messages(
@@ -203,7 +223,14 @@ def build_index_if_needed(uploaded_files, force_rebuild: bool = False) -> None:
         raise ValueError("No supported documents were found. Add .txt, .pdf, or .docx files.")
 
     st.session_state.rag_sources = sources
-    st.session_state.rag_vector_store = build_vector_store(documents, api_key=get_api_key())
+    vector_store, embedding_model, embedding_failovers = build_vector_store(
+        documents,
+        api_key=get_api_key(),
+        embedding_chain=parse_embedding_chain(),
+    )
+    st.session_state.rag_vector_store = vector_store
+    st.session_state.rag_last_embedding_model = embedding_model
+    st.session_state.rag_embedding_failovers = embedding_failovers
     st.session_state.rag_index_signature = signature
 
 
@@ -247,11 +274,13 @@ def sidebar():
         st.rerun()
 
     source, key = get_api_key_status()
+    embedding_chain = parse_embedding_chain()
     st.sidebar.divider()
     st.sidebar.subheader("Diagnostics")
     st.sidebar.write(f"Key source: `{source}`")
     st.sidebar.write(f"Key detected: `{mask_secret(key)}`")
     st.sidebar.write(f"Model chain: `{', '.join(parse_model_chain(model_name, fallback_models))}`")
+    st.sidebar.write(f"Embedding chain: `{', '.join(embedding_chain)}`")
     st.sidebar.write(f"Local knowledge files: `{len(load_local_sources(KNOWLEDGE_DIR))}`")
     st.sidebar.write(f"Uploaded documents: `{len(uploaded_files) if uploaded_files else 0}`")
     return model_name, fallback_models, temperature, top_k, uploaded_files or [], rebuild
@@ -276,12 +305,19 @@ def render_context_panel() -> None:
     with st.expander("Last model run", expanded=False):
         if not st.session_state.rag_last_model:
             st.caption("No model invocation yet.")
-            return
-        st.write(f"Model used: `{st.session_state.rag_last_model}`")
-        if st.session_state.rag_model_failovers:
-            st.write("Automatic fallback attempts:")
-            for item in st.session_state.rag_model_failovers:
-                st.code(item)
+        else:
+            st.write(f"LLM used: `{st.session_state.rag_last_model}`")
+            if st.session_state.rag_model_failovers:
+                st.write("LLM fallback attempts:")
+                for item in st.session_state.rag_model_failovers:
+                    st.code(item)
+
+        if st.session_state.rag_last_embedding_model:
+            st.write(f"Embedding model used: `{st.session_state.rag_last_embedding_model}`")
+            if st.session_state.rag_embedding_failovers:
+                st.write("Embedding fallback attempts:")
+                for item in st.session_state.rag_embedding_failovers:
+                    st.code(item)
 
 
 def main() -> None:

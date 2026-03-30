@@ -37,9 +37,12 @@ Copy-Item .env.example .env
 Optional model fallback chain:
 
 ```text
-GEMINI_MODEL=Gemini 2.5 Flash
-GEMINI_FALLBACK_MODELS=Gemini 3 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
-GEMINI_AVAILABLE_MODELS=Gemini 2.5 Flash,Gemini 3 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
+GEMINI_MODEL=Gemini 3 Flash
+GEMINI_FALLBACK_MODELS=Gemini 2.5 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
+GEMINI_AVAILABLE_MODELS=Gemini 3 Flash,Gemini 2.5 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+GEMINI_FALLBACK_EMBEDDING_MODELS=gemini-embedding-002
+GEMINI_AVAILABLE_EMBEDDING_MODELS=gemini-embedding-001,gemini-embedding-002
 ```
 
 ## Run
@@ -64,6 +67,7 @@ The sample RAG app:
 - supports additional uploaded documents from the UI
 - splits them into chunks with `RecursiveCharacterTextSplitter`
 - creates embeddings with Gemini `gemini-embedding-001`
+- can fall back to `gemini-embedding-002` if the primary embedding model hits a quota or rate-limit error
 - builds an in-memory `FAISS` vector store
 - retrieves the most similar chunks for a question
 - passes those chunks to Gemini as grounded context
@@ -77,6 +81,7 @@ To expand the knowledge base, add more files to `knowledge_base/` or upload them
 - Do not commit `.env` files or reuse any Gemini API key that was pasted into chat or source control.
 - Gemini free-tier rate limits and available models can change by project and region.
 - The app only switches models automatically for quota and rate-limit style failures, not for invalid prompts, auth failures, or unsupported model names.
+- The vector index build now has its own embedding fallback chain, separate from the chat-model fallback chain.
 - The vector index is in-memory for the current app session and is rebuilt when local or uploaded documents change.
 
 ## Free-tier Reference

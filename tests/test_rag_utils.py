@@ -111,7 +111,7 @@ def test_invoke_with_model_fallback_switches_on_limit_error(monkeypatch) -> None
 
         return FakeLlm()
 
-    monkeypatch.setattr("rag_app.build_llm", fake_build_llm)
+    monkeypatch.setattr("rag_llm.build_llm", fake_build_llm)
     response, used_model, errors = invoke_with_model_fallback(
         messages=["hello"],
         model_chain=["Gemini 3.1 Flash Lite", "Gemini 3 Flash"],

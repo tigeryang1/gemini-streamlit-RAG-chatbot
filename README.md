@@ -1,6 +1,6 @@
 # Gemini Streamlit RAG Chatbot
 
-Simple chatbot app built with `Streamlit`, `LangChain`, and the Gemini Developer API. This repo also includes a more realistic RAG chatbot with embeddings, a FAISS index, and document uploads.
+RAG chatbot app built with `Streamlit`, `LangChain`, and the Gemini Developer API, with embeddings, a FAISS index, and document uploads.
 
 ## Stack
 
@@ -12,7 +12,6 @@ Simple chatbot app built with `Streamlit`, `LangChain`, and the Gemini Developer
 
 ## Project Files
 
-- `app.py` - basic chat app
 - `rag_app.py` - RAG-enabled chat app
 - `rag_utils.py` - ingestion, chunking, and vector retrieval helpers
 - `knowledge_base/` - sample retrieval documents
@@ -37,9 +36,9 @@ Copy-Item .env.example .env
 Optional model fallback chain:
 
 ```text
-GEMINI_MODEL=Gemini 3 Flash
-GEMINI_FALLBACK_MODELS=Gemini 2.5 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
-GEMINI_AVAILABLE_MODELS=Gemini 3 Flash,Gemini 2.5 Flash,Gemini 2.5 Flash Lite,Gemini 3.1 Flash Lite
+GEMINI_MODEL=Gemini 3.1 Flash Lite
+GEMINI_FALLBACK_MODELS=Gemini 3 Flash,Gemini 2.5 Flash,Gemini 2.5 Flash Lite
+GEMINI_AVAILABLE_MODELS=Gemini 3.1 Flash Lite,Gemini 3 Flash,Gemini 2.5 Flash,Gemini 2.5 Flash Lite
 GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 GEMINI_FALLBACK_EMBEDDING_MODELS=gemini-embedding-002
 GEMINI_AVAILABLE_EMBEDDING_MODELS=gemini-embedding-001,gemini-embedding-002
@@ -47,13 +46,7 @@ GEMINI_AVAILABLE_EMBEDDING_MODELS=gemini-embedding-001,gemini-embedding-002
 
 ## Run
 
-Basic chat app:
-
-```powershell
-streamlit run app.py
-```
-
-Sample RAG chat app:
+RAG chat app:
 
 ```powershell
 streamlit run rag_app.py
@@ -83,6 +76,7 @@ To expand the knowledge base, add more files to `knowledge_base/` or upload them
 - The app only switches models automatically for quota and rate-limit style failures, not for invalid prompts, auth failures, or unsupported model names.
 - The vector index build now has its own embedding fallback chain, separate from the chat-model fallback chain.
 - The vector index is in-memory for the current app session and is rebuilt when local or uploaded documents change.
+- This project intentionally uses a local FAISS index only. It does not include a remote Google vector-store mode such as Gemini File Search or Vertex AI Vector Search.
 
 ## Free-tier Reference
 
